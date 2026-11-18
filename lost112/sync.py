@@ -31,7 +31,10 @@ class Syncer(threading.Thread):
         }
 
     def snapshot(self) -> dict:
-        return dict(self.state)
+        state = dict(self.state)
+        state["lastSync"] = self.store.get_meta("last_sync")
+        state["lastFull"] = self.store.get_meta("last_full")
+        return state
 
     def trigger(self) -> None:
         self._wake.set()
@@ -104,13 +107,20 @@ def main() -> None:
     if not settings.service_key:
         print(".env 의 LOST112_SERVICE_KEY 가 비어 있습니다.")
         sys.exit(1)
-    days = int(sys.argv[1]) if len(sys.argv) > 1 else settings.sync_days
     store = Store(settings.db_path, settings.turso_url, settings.turso_token)
     syncer = Syncer(Lost112Client(settings.service_key), store, settings)
+    if len(sys.argv) > 1 and sys.argv[1] == "auto":
+        full = syncer._needs_full()
+        days = settings.sync_days if full else settings.refresh_days
+    else:
+        days = int(sys.argv[1]) if len(sys.argv) > 1 else settings.sync_days
+        full = days >= settings.sync_days
     started = time.time()
     print(f"최근 {days}일치 받는 중…")
-    syncer.sync(days, full=days >= settings.sync_days, log=print)
+    syncer.sync(days, full=full, log=print)
     print(f"완료 {time.time() - started:.0f}초 | {store.stats()} | 오류: {syncer.state['error']}")
+    if syncer.state["error"] or syncer.state["done"] != days:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
