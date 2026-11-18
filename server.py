@@ -42,7 +42,7 @@ DETAIL_BATCH = 8
 class App:
     def __init__(self, settings: Settings):
         self.settings = settings
-        self.store = Store(settings.db_path)
+        self.store = Store(settings.db_path, settings.turso_url, settings.turso_token)
         self.client = Lost112Client(settings.service_key) if settings.service_key else None
         self.syncer = Syncer(self.client, self.store, settings) if self.client else None
         self._pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="detail")

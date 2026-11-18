@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-_KEYS = ("LOST112_SERVICE_KEY", "PORT", "SYNC_DAYS", "REFRESH_DAYS", "REFRESH_MINUTES")
+_KEYS = ("LOST112_SERVICE_KEY", "PORT", "SYNC_DAYS", "REFRESH_DAYS", "REFRESH_MINUTES", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN")
 
 
 def _read_env_file(path: Path) -> dict:
@@ -37,6 +37,8 @@ class Settings:
     refresh_days: int     # 주기 갱신 때 다시 받을 최근 기간(일)
     refresh_minutes: int  # 주기 갱신 간격(분)
     db_path: Path
+    turso_url: str = ""
+    turso_token: str = ""
 
     @classmethod
     def load(cls) -> "Settings":
@@ -52,4 +54,6 @@ class Settings:
             refresh_days=_int(env.get("REFRESH_DAYS"), 5, 1, 30),
             refresh_minutes=_int(env.get("REFRESH_MINUTES"), 60, 10, 24 * 60),
             db_path=ROOT / "data" / "lost112.db",
+            turso_url=env.get("TURSO_DATABASE_URL", "").strip(),
+            turso_token=env.get("TURSO_AUTH_TOKEN", "").strip(),
         )

@@ -1,4 +1,4 @@
-"""SQLite 저장소.
+"""로컬 SQLite 또는 Turso libSQL 저장소.
 
 items   : 습득물 목록 (보관장소 해석 결과와 '원래 습득역' 포함)
 orgs    : 기관번호(atcId 앞 8자리) → 역 매핑. 역 보관 물건에서 배운다.
@@ -107,22 +107,41 @@ def _like(text: str) -> str:
 
 
 class Store:
-    def __init__(self, path: Path):
-        path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, path: Path, turso_url: str = "", turso_token: str = ""):
+        self._remote = bool(turso_url)
         self._lock = threading.RLock()
-        self._db = sqlite3.connect(path, check_same_thread=False)
-        self._db.row_factory = sqlite3.Row
+        if self._remote:
+            if not turso_token:
+                raise ValueError("TURSO_AUTH_TOKEN 환경변수가 필요합니다")
+            import libsql
+            self._db = libsql.connect(database=turso_url, auth_token=turso_token)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._db = sqlite3.connect(path, check_same_thread=False)
+            self._db.row_factory = sqlite3.Row
         with self._lock:
-            self._db.execute("PRAGMA journal_mode=WAL")
+            if not self._remote:
+                self._db.execute("PRAGMA journal_mode=WAL")
             self._db.execute("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)")
-            if self.get_meta("schema") != SCHEMA_VERSION:
-                # 해석 규칙이 바뀌면 다시 받으면 되는 데이터라 새로 만든다
-                with self._db:
+            version = self.get_meta("schema")
+            if version != SCHEMA_VERSION:
+                if self._remote and version is not None:
+                    raise RuntimeError(f"Turso DB 스키마 버전이 다릅니다: {version}")
+                if version is not None:
+                    # 로컬 데이터는 다시 받을 수 있으므로 이전 스키마를 재생성한다.
                     self._db.executescript(
                         "DROP TABLE IF EXISTS items; DROP TABLE IF EXISTS orgs; "
                         "DELETE FROM meta WHERE k IN ('last_sync', 'last_full');")
-            self._db.executescript(SCHEMA)
-            self.set_meta("schema", SCHEMA_VERSION)
+                for statement in SCHEMA.split(";"):
+                    if statement.strip():
+                        self._db.execute(statement)
+                self.set_meta("schema", SCHEMA_VERSION)
+
+    @staticmethod
+    def _as_dict(cursor, row):
+        if isinstance(row, sqlite3.Row):
+            return dict(row)
+        return dict(zip((column[0] for column in cursor.description), row))
 
     # ---- 메타 -----------------------------------------------------------
     def get_meta(self, key: str) -> str | None:
@@ -236,10 +255,11 @@ class Store:
         where, args = self._where(**query)
         with self._lock:
             total = self._db.execute(f"SELECT COUNT(*) FROM items WHERE {where}", args).fetchone()[0]
-            rows = self._db.execute(
+            cursor = self._db.execute(
                 f"SELECT * FROM items WHERE {where} ORDER BY fd_ymd DESC, atc_id DESC LIMIT ?",
-                args + [limit]).fetchall()
-        return total, [dict(r) for r in rows]
+                args + [limit])
+            rows = cursor.fetchall()
+        return total, [self._as_dict(cursor, r) for r in rows]
 
     def station_lines(self, station: str) -> list[str]:
         with self._lock:
@@ -288,9 +308,10 @@ class Store:
 
     def get_item(self, atc_id: str, fd_sn: str) -> dict | None:
         with self._lock:
-            row = self._db.execute(
-                "SELECT * FROM items WHERE atc_id = ? AND fd_sn = ?", (atc_id, fd_sn)).fetchone()
-        return dict(row) if row else None
+            cursor = self._db.execute(
+                "SELECT * FROM items WHERE atc_id = ? AND fd_sn = ?", (atc_id, fd_sn))
+            row = cursor.fetchone()
+        return self._as_dict(cursor, row) if row else None
 
     # ---- 상세 캐시 ------------------------------------------------------
     def get_detail(self, atc_id: str, fd_sn: str, max_age_hours: float = 6) -> dict | None:

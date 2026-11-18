@@ -105,7 +105,7 @@ def main() -> None:
         print(".env 의 LOST112_SERVICE_KEY 가 비어 있습니다.")
         sys.exit(1)
     days = int(sys.argv[1]) if len(sys.argv) > 1 else settings.sync_days
-    store = Store(settings.db_path)
+    store = Store(settings.db_path, settings.turso_url, settings.turso_token)
     syncer = Syncer(Lost112Client(settings.service_key), store, settings)
     started = time.time()
     print(f"최근 {days}일치 받는 중…")
