@@ -59,9 +59,10 @@ CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 COLUMNS = ("atc_id", "fd_sn", "fd_ymd", "prdt_cl", "cat", "clr", "name", "img", "dep_place",
            "kind", "station", "lines", "is_transit", "origin_station", "origin_lines",
            "origin_src", "updated_at")
+_ROW_PLACEHOLDERS = f"({', '.join('?' * len(COLUMNS))})"
 _BASE_UPDATE = ", ".join(f"{c} = excluded.{c}" for c in COLUMNS[2:13] + ("updated_at",))
 UPSERT = (
-    f"INSERT INTO items ({', '.join(COLUMNS)}) VALUES ({', '.join('?' * len(COLUMNS))}) "
+    f"INSERT INTO items ({', '.join(COLUMNS)}) VALUES {_ROW_PLACEHOLDERS} "
     f"ON CONFLICT (atc_id, fd_sn) DO UPDATE SET {_BASE_UPDATE}, "
     # 역에 있다가 센터로 옮겨진 물건은 예전에 알던 원래 역을 그대로 둔다
     "origin_station = CASE WHEN excluded.origin_src IS NOT NULL THEN excluded.origin_station ELSE items.origin_station END, "
@@ -164,7 +165,15 @@ class Store:
                 "SELECT atc_id, fd_sn FROM items WHERE fd_ymd = ?", (ymd,)).fetchall()
             stale = [(a, s) for a, s in existing if (a, s) not in fresh]
             self._db.executemany("DELETE FROM items WHERE atc_id = ? AND fd_sn = ?", stale)
-            self._db.executemany(UPSERT, rows)
+            if self._remote:
+                # 원격 DB에 행마다 요청하지 않도록 한 문장에 여러 행을 담는다.
+                for start in range(0, len(rows), 50):
+                    batch = rows[start:start + 50]
+                    values = ", ".join([_ROW_PLACEHOLDERS] * len(batch))
+                    sql = UPSERT.replace(f"VALUES {_ROW_PLACEHOLDERS}", f"VALUES {values}", 1)
+                    self._db.execute(sql, [value for row in batch for value in row])
+            else:
+                self._db.executemany(UPSERT, rows)
         return len(rows), len(stale)
 
     def rebuild_origins(self) -> dict:
