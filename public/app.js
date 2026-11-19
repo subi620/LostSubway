@@ -27,7 +27,7 @@
     try {
       const url = new URL(original);
       if (url.protocol !== 'https:' || url.hostname !== 'minwon24.police.go.kr') return original;
-      return `/_vercel/image?${new URLSearchParams({ url: original, w: width, q: quality })}`;
+      return `/api/image?${new URLSearchParams({ url: original, w: width, q: quality })}`;
     } catch { return original; }
   }
 
