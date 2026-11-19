@@ -577,6 +577,64 @@
     }
   }
 
+  function loadDetailPhoto(photo, original, optimized, preview, signal) {
+    if (!photo) return;
+    if (optimized === original) {
+      photo.addEventListener('error', () => photo.parentElement?.remove(), { once: true });
+      return;
+    }
+
+    let full = photo;
+    let raw = null;
+    let timer;
+    let done = false;
+    const finish = (loaded) => {
+      if (done || signal?.aborted || !photo.isConnected) return;
+      done = true;
+      clearTimeout(timer);
+      if (loaded !== photo) {
+        photo.replaceWith(loaded);
+        photo.src = '';
+      }
+      if (full !== loaded && full !== photo) full.src = '';
+      if (raw && raw !== loaded) raw.src = '';
+    };
+    const startRaw = () => {
+      if (raw || done || signal?.aborted || !photo.isConnected) return;
+      raw = new Image();
+      raw.alt = photo.alt;
+      raw.decoding = 'async';
+      raw.referrerPolicy = 'no-referrer';
+      raw.onload = () => finish(raw);
+      raw.onerror = () => {
+        if (!preview && full.complete && !full.naturalWidth && photo.isConnected) photo.parentElement.remove();
+      };
+      raw.src = original;
+    };
+
+    if (preview) {
+      full = new Image();
+      full.alt = photo.alt;
+      full.decoding = 'async';
+      full.referrerPolicy = 'no-referrer';
+      full.fetchPriority = 'high';
+      full.onload = () => finish(full);
+      full.onerror = startRaw;
+      full.src = optimized;
+      photo.addEventListener('error', startRaw, { once: true });
+    } else {
+      photo.addEventListener('load', () => finish(photo), { once: true });
+      photo.addEventListener('error', startRaw, { once: true });
+      if (photo.complete && photo.naturalWidth) return finish(photo);
+    }
+    timer = setTimeout(startRaw, 1500);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      if (full !== photo) full.src = '';
+      if (raw) raw.src = '';
+    }, { once: true });
+  }
+
   async function fillStatuses(ids, signal) {
     if (!ids.length) return;
     try {
@@ -739,6 +797,8 @@
     const tel = d.tel;
     const img = d.img || it.img;
     const detailSrc = photoSrc(img, 640, 75);
+    const previewSrc = lastResults?.items?.some((result) => result.id === id && result.img === img)
+      ? photoSrc(img, 128, 65) : detailSrc;
     document.title = `${it.name} · 로스트인지하철`;
 
     const facts = [
@@ -758,7 +818,7 @@
         <div class="item-place"><span class="badges">${lineBadges(it.lines, true)}</span>${esc(place)} · ${fmtYmd(it.ymd)} 습득</div>
         ${it.movedFrom ? `<div class="item-moved">${icon('i-train')}${esc(it.movedFrom)}역에서 습득한 뒤 유실물센터로 옮겨졌어요</div>` : ''}
       </div>
-      ${img ? `<div class="photo"><img src="${esc(detailSrc)}" ${detailSrc !== img ? `data-original="${esc(img)}"` : ''} alt="${esc(it.name)} 사진" decoding="async" fetchpriority="high" referrerpolicy="no-referrer"></div>` : ''}
+      ${img ? `<div class="photo"><img src="${esc(previewSrc)}" alt="${esc(it.name)} 사진" decoding="async" fetchpriority="high" referrerpolicy="no-referrer"></div>` : ''}
       ${data.error ? `<div class="item-section"><p class="notice">상세 정보를 불러오지 못해 목록 정보만 보여드려요. (${esc(data.error)})</p></div>` : ''}
 
       <div class="item-section">
@@ -794,7 +854,7 @@
         <a class="btn-map" href="https://map.kakao.com/link/search/${encodeURIComponent(mapQuery(place))}" target="_blank" rel="noopener noreferrer">${icon('i-pin')}지도에서 보기</a>
       </div>`;
 
-    bindPhotoFallbacks(body);
+    loadDetailPhoto($('.photo img', body), img, detailSrc, previewSrc !== detailSrc, signal);
   }
 
   // ---------- 시작 ----------
