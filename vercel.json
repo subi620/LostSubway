@@ -1,5 +1,15 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "regions": ["hnd1"]
+  "regions": ["hnd1"],
+  "images": {
+    "sizes": [128, 640],
+    "domains": [],
+    "remotePatterns": [
+      { "protocol": "https", "hostname": "^minwon24\\.police\\.go\\.kr$" }
+    ],
+    "qualities": [65, 75],
+    "formats": ["image/webp"],
+    "minimumCacheTTL": 86400
+  }
 }

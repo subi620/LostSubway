@@ -22,6 +22,15 @@
   const PAGE = 30;
   const DETAIL_BATCH = 8;
 
+  function photoSrc(original, width, quality) {
+    if (!original || ['localhost', '127.0.0.1'].includes(location.hostname)) return original;
+    try {
+      const url = new URL(original);
+      if (url.protocol !== 'https:' || url.hostname !== 'minwon24.police.go.kr') return original;
+      return `/_vercel/image?${new URLSearchParams({ url: original, w: width, q: quality })}`;
+    } catch { return original; }
+  }
+
   // localStorage 는 막혀 있을 수 있으니 항상 try/catch
   const local = {
     get(key, fallback) {
@@ -529,8 +538,9 @@
   }
 
   function cardHtml(it, { pending, isNew }) {
+    const thumbSrc = photoSrc(it.img, 128, 65);
     const thumb = it.img
-      ? `<img src="${esc(it.img)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-fallback="${esc(CAT[it.cat]?.icon || 'i-dots')}">`
+      ? `<img src="${esc(thumbSrc)}" ${thumbSrc !== it.img ? `data-original="${esc(it.img)}"` : ''} alt="" width="60" height="60" loading="lazy" decoding="async" fetchpriority="low" referrerpolicy="no-referrer" data-fallback="${esc(CAT[it.cat]?.icon || 'i-dots')}">`
       : icon(CAT[it.cat]?.icon || 'i-dots', 'ic lg');
     const origin = it.movedFrom
       ? `<span class="card-origin">${icon('i-train')}<span class="truncate">${esc(it.movedFrom)}역에서 습득 → 센터로 옮겨짐</span></span>`
@@ -552,9 +562,18 @@
       </li>`;
   }
 
-  function bindThumbFallbacks(root) {
-    for (const img of $$('img[data-fallback]', root)) {
-      img.addEventListener('error', () => { img.parentElement.innerHTML = icon(img.dataset.fallback, 'ic lg'); }, { once: true });
+  function bindPhotoFallbacks(root) {
+    for (const img of $$('img[data-fallback], img[data-original]', root)) {
+      img.addEventListener('error', () => {
+        if (img.dataset.original) {
+          img.src = img.dataset.original;
+          delete img.dataset.original;
+        } else if (img.dataset.fallback) {
+          img.parentElement.innerHTML = icon(img.dataset.fallback, 'ic lg');
+        } else {
+          img.parentElement.remove();
+        }
+      });
     }
   }
 
@@ -672,7 +691,7 @@
       const ul = $('#cards');
       ul.insertAdjacentHTML('beforeend', chunk.map((it, i) =>
         cardHtml(it, { pending: shown + i < DETAIL_BATCH, isNew: fresh.has(it.id) && findWatch(data.query) })).join(''));
-      bindThumbFallbacks(ul);
+      bindPhotoFallbacks(ul);
       shown += chunk.length;
       const left = data.items.length - shown;
       more.hidden = left <= 0;
@@ -719,6 +738,7 @@
     const place = d.depPlace || it.place;
     const tel = d.tel;
     const img = d.img || it.img;
+    const detailSrc = photoSrc(img, 640, 75);
     document.title = `${it.name} · 로스트인지하철`;
 
     const facts = [
@@ -738,7 +758,7 @@
         <div class="item-place"><span class="badges">${lineBadges(it.lines, true)}</span>${esc(place)} · ${fmtYmd(it.ymd)} 습득</div>
         ${it.movedFrom ? `<div class="item-moved">${icon('i-train')}${esc(it.movedFrom)}역에서 습득한 뒤 유실물센터로 옮겨졌어요</div>` : ''}
       </div>
-      ${img ? `<div class="photo"><img src="${esc(img)}" alt="${esc(it.name)} 사진" referrerpolicy="no-referrer"></div>` : ''}
+      ${img ? `<div class="photo"><img src="${esc(detailSrc)}" ${detailSrc !== img ? `data-original="${esc(img)}"` : ''} alt="${esc(it.name)} 사진" decoding="async" fetchpriority="high" referrerpolicy="no-referrer"></div>` : ''}
       ${data.error ? `<div class="item-section"><p class="notice">상세 정보를 불러오지 못해 목록 정보만 보여드려요. (${esc(data.error)})</p></div>` : ''}
 
       <div class="item-section">
@@ -774,8 +794,7 @@
         <a class="btn-map" href="https://map.kakao.com/link/search/${encodeURIComponent(mapQuery(place))}" target="_blank" rel="noopener noreferrer">${icon('i-pin')}지도에서 보기</a>
       </div>`;
 
-    const photo = $('.photo img', body);
-    photo?.addEventListener('error', () => photo.parentElement.remove(), { once: true });
+    bindPhotoFallbacks(body);
   }
 
   // ---------- 시작 ----------
