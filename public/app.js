@@ -577,64 +577,6 @@
     }
   }
 
-  function loadDetailPhoto(photo, original, optimized, preview, signal) {
-    if (!photo) return;
-    if (optimized === original) {
-      photo.addEventListener('error', () => photo.parentElement?.remove(), { once: true });
-      return;
-    }
-
-    let full = photo;
-    let raw = null;
-    let timer;
-    let done = false;
-    const finish = (loaded) => {
-      if (done || signal?.aborted || !photo.isConnected) return;
-      done = true;
-      clearTimeout(timer);
-      if (loaded !== photo) {
-        photo.replaceWith(loaded);
-        photo.src = '';
-      }
-      if (full !== loaded && full !== photo) full.src = '';
-      if (raw && raw !== loaded) raw.src = '';
-    };
-    const startRaw = () => {
-      if (raw || done || signal?.aborted || !photo.isConnected) return;
-      raw = new Image();
-      raw.alt = photo.alt;
-      raw.decoding = 'async';
-      raw.referrerPolicy = 'no-referrer';
-      raw.onload = () => finish(raw);
-      raw.onerror = () => {
-        if (!preview && full.complete && !full.naturalWidth && photo.isConnected) photo.parentElement.remove();
-      };
-      raw.src = original;
-    };
-
-    if (preview) {
-      full = new Image();
-      full.alt = photo.alt;
-      full.decoding = 'async';
-      full.referrerPolicy = 'no-referrer';
-      full.fetchPriority = 'high';
-      full.onload = () => finish(full);
-      full.onerror = startRaw;
-      full.src = optimized;
-      photo.addEventListener('error', startRaw, { once: true });
-    } else {
-      photo.addEventListener('load', () => finish(photo), { once: true });
-      photo.addEventListener('error', startRaw, { once: true });
-      if (photo.complete && photo.naturalWidth) return finish(photo);
-    }
-    timer = setTimeout(startRaw, 1500);
-    signal?.addEventListener('abort', () => {
-      clearTimeout(timer);
-      if (full !== photo) full.src = '';
-      if (raw) raw.src = '';
-    }, { once: true });
-  }
-
   async function fillStatuses(ids, signal) {
     if (!ids.length) return;
     try {
@@ -771,7 +713,28 @@
     $('#item-back').href = back || '#/';
     $('#item-back').setAttribute('aria-label', back ? '검색 결과로 돌아가기' : '처음으로');
     const body = $('#item-body');
-    body.innerHTML = '<div class="item-section"><div class="skeleton"></div><div class="skeleton"></div></div>';
+    const known = lastResults?.items?.find((result) => result.id === id && result.img);
+    const thumbnail = known ? photoSrc(known.img, 128, 65) : '';
+    const fullSrc = known ? photoSrc(known.img, 640, 75) : '';
+    body.innerHTML = `
+      ${known ? `<div class="item-head"><h2 class="item-name">${esc(known.name)}</h2></div>
+        <div class="photo"><img src="${esc(thumbnail)}" alt="${esc(known.name)} 사진" decoding="async" fetchpriority="high" referrerpolicy="no-referrer"></div>` : ''}
+      <div class="item-section"><div class="skeleton"></div><div class="skeleton"></div></div>`;
+    const earlyPhoto = $('.photo', body);
+    const preparedFull = known && fullSrc !== thumbnail ? new Image() : null;
+    if (preparedFull) {
+      preparedFull.alt = `${known.name} 사진`;
+      preparedFull.decoding = 'async';
+      preparedFull.referrerPolicy = 'no-referrer';
+      preparedFull.fetchPriority = 'high';
+      preparedFull.onload = () => {
+        if (signal?.aborted || !earlyPhoto?.isConnected) return;
+        const current = earlyPhoto.querySelector('img');
+        if (current !== preparedFull) current?.replaceWith(preparedFull);
+      };
+      preparedFull.src = fullSrc;
+      signal?.addEventListener('abort', () => { preparedFull.src = ''; }, { once: true });
+    }
     focusHeading('view-item');
 
     let data;
@@ -779,12 +742,14 @@
       data = await api('item', { id }, signal);
     } catch (e) {
       if (e.name === 'AbortError') return;
+      if (preparedFull) preparedFull.src = '';
       body.innerHTML = `<div class="item-section"><div class="error-box"><p>${esc(e.message)}</p>
         <button type="button" class="btn-ghost" id="retry">${icon('i-refresh')}다시 시도</button></div></div>`;
       $('#retry').addEventListener('click', route);
       return;
     }
     if (!data.item) {
+      if (preparedFull) preparedFull.src = '';
       body.innerHTML = `<div class="item-section"><div class="error-box"><p>${esc(data.error)}</p>
         <a class="btn-ghost" href="https://www.lost112.go.kr/" target="_blank" rel="noopener noreferrer">LOST112에서 확인 ${icon('i-external')}</a></div></div>`;
       return;
@@ -797,8 +762,7 @@
     const tel = d.tel;
     const img = d.img || it.img;
     const detailSrc = photoSrc(img, 640, 75);
-    const previewSrc = lastResults?.items?.some((result) => result.id === id && result.img === img)
-      ? photoSrc(img, 128, 65) : detailSrc;
+    const reusePhoto = Boolean(earlyPhoto && known?.img === img);
     document.title = `${it.name} · 로스트인지하철`;
 
     const facts = [
@@ -818,7 +782,7 @@
         <div class="item-place"><span class="badges">${lineBadges(it.lines, true)}</span>${esc(place)} · ${fmtYmd(it.ymd)} 습득</div>
         ${it.movedFrom ? `<div class="item-moved">${icon('i-train')}${esc(it.movedFrom)}역에서 습득한 뒤 유실물센터로 옮겨졌어요</div>` : ''}
       </div>
-      ${img ? `<div class="photo"><img src="${esc(previewSrc)}" alt="${esc(it.name)} 사진" decoding="async" fetchpriority="high" referrerpolicy="no-referrer"></div>` : ''}
+      ${img ? `<div class="photo"><img src="${esc(detailSrc)}" ${detailSrc !== img ? `data-original="${esc(img)}"` : ''} alt="${esc(it.name)} 사진" decoding="async" fetchpriority="high" referrerpolicy="no-referrer"></div>` : ''}
       ${data.error ? `<div class="item-section"><p class="notice">상세 정보를 불러오지 못해 목록 정보만 보여드려요. (${esc(data.error)})</p></div>` : ''}
 
       <div class="item-section">
@@ -854,7 +818,15 @@
         <a class="btn-map" href="https://map.kakao.com/link/search/${encodeURIComponent(mapQuery(place))}" target="_blank" rel="noopener noreferrer">${icon('i-pin')}지도에서 보기</a>
       </div>`;
 
-    loadDetailPhoto($('.photo img', body), img, detailSrc, previewSrc !== detailSrc, signal);
+    if (reusePhoto) {
+      $('.photo', body).replaceWith(earlyPhoto);
+      if (preparedFull?.complete && preparedFull.naturalWidth && !earlyPhoto.contains(preparedFull)) {
+        earlyPhoto.querySelector('img')?.replaceWith(preparedFull);
+      }
+    } else {
+      if (preparedFull) preparedFull.src = '';
+      bindPhotoFallbacks(body);
+    }
   }
 
   // ---------- 시작 ----------
