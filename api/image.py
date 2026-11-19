@@ -61,8 +61,8 @@ class handler(BaseHTTPRequestHandler):
             return self._send(400, b"Invalid photo request", "text/plain; charset=utf-8")
 
         try:
-            request = Request(url, headers={"User-Agent": "LostInSubway/1.0"})
-            with urlopen(request, timeout=10) as response:
+            request = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urlopen(request, timeout=30) as response:
                 if not allowed_photo(response.geturl()):
                     raise ValueError("Unexpected photo redirect")
                 raw = response.read(MAX_SOURCE_BYTES + 1)
@@ -71,6 +71,6 @@ class handler(BaseHTTPRequestHandler):
             optimized = resize_photo(raw, width, quality)
         except (OSError, ValueError, UnidentifiedImageError, Image.DecompressionBombError) as error:
             self.log_error("Photo conversion failed: %s", type(error).__name__)
-            return self._send(502, b"Photo unavailable", "text/plain; charset=utf-8")
+            return self._send(502, type(error).__name__.encode(), "text/plain; charset=utf-8")
 
         self._send(200, optimized, "image/webp", cache=True)
