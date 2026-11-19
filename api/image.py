@@ -71,8 +71,6 @@ class handler(BaseHTTPRequestHandler):
             optimized = resize_photo(raw, width, quality)
         except (OSError, ValueError, UnidentifiedImageError, Image.DecompressionBombError) as error:
             self.log_error("Photo conversion failed: %s", type(error).__name__)
-            reason = getattr(error, "reason", "")
-            detail = f"{type(error).__name__}: {type(reason).__name__}: {str(reason)[:120]}"
-            return self._send(502, detail.encode(), "text/plain; charset=utf-8")
+            return self._send(502, b"Photo unavailable", "text/plain; charset=utf-8")
 
         self._send(200, optimized, "image/webp", cache=True)
